@@ -1,0 +1,33 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "eu.ansvar/maltese-competition-mcp",
+  "description": "Query MCCAA (Malta Competition and Consumer Affairs Authority) competition law decisions, merger control cases, and sector enforcement activity",
+  "repository": {
+    "url": "https://github.com/Ansvar-Systems/maltese-competition-mcp",
+    "source": "github"
+  },
+  "homepage": "https://ansvar.eu",
+  "version": "0.1.0",
+  "license": "Apache-2.0",
+  "keywords": [
+    "mccaa",
+    "maltese-competition",
+    "competition-law",
+    "antitrust",
+    "merger-control",
+    "malta",
+    "compliance",
+    "mcp",
+    "ansvar"
+  ],
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@ansvar/maltese-competition-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
