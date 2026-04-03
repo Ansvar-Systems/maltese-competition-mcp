@@ -13,7 +13,6 @@ ENV MCCAA_DB_PATH=/app/data/mccaa.db
 COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 COPY --from=builder /app/dist/ dist/
-COPY data/mccaa.db data/mccaa.db
 RUN addgroup --system --gid 1001 mcp && \
     adduser --system --uid 1001 --ingroup mcp mcp && \
     chown -R mcp:mcp /app
