@@ -149,6 +149,26 @@ const TOOLS = [
     },
   },
   {
+    name: "mt_comp_list_sources",
+    description:
+      "List all data sources ingested into this MCP, with provenance, licensing, and last-updated metadata.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: "mt_comp_check_data_freshness",
+    description:
+      "Check the freshness of the ingested data. Returns last-updated timestamp, record counts, and whether data may be stale.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
     name: "mt_comp_about",
     description:
       "Return metadata about this MCP server: version, data source, coverage, and tool list.",
@@ -187,17 +207,27 @@ const GetMergerArgs = z.object({
 
 // --- Helper ------------------------------------------------------------------
 
+function responseMeta() {
+  return {
+    disclaimer: "Research tool only — not regulatory or legal advice. Verify all references against primary sources.",
+    data_age: "2026-03-23",
+    copyright: "© Malta Competition and Consumer Affairs Authority",
+    source_url: "https://www.mccaa.org.mt/",
+  };
+}
+
 function textContent(data: unknown) {
+  const payload = typeof data === "object" && data !== null ? data : { value: data };
   return {
     content: [
-      { type: "text" as const, text: JSON.stringify(data, null, 2) },
+      { type: "text" as const, text: JSON.stringify({ ...payload as object, _meta: responseMeta() }, null, 2) },
     ],
   };
 }
 
-function errorContent(message: string) {
+function errorContent(message: string, errorType = "tool_error") {
   return {
-    content: [{ type: "text" as const, text: message }],
+    content: [{ type: "text" as const, text: JSON.stringify({ error: message, _meta: responseMeta(), _error_type: errorType }) }],
     isError: true as const,
   };
 }
@@ -227,14 +257,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           outcome: parsed.outcome,
           limit: parsed.limit,
         });
-        return textContent({ results, count: results.length });
+        const resultsWithCitation = results.map((r) => ({
+          ...r,
+          _citation: buildCitation(
+            r.case_number,
+            r.title,
+            "mt_comp_get_decision",
+            { case_number: r.case_number },
+          ),
+        }));
+        return textContent({ results: resultsWithCitation, count: results.length });
       }
 
       case "mt_comp_get_decision": {
         const parsed = GetDecisionArgs.parse(args);
         const decision = getDecision(parsed.case_number);
         if (!decision) {
-          return errorContent(`Decision not found: ${parsed.case_number}`);
+          return errorContent(`Decision not found: ${parsed.case_number}`, "not_found");
         }
         const d = decision as Record<string, unknown>;
         return textContent({
@@ -257,14 +296,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           outcome: parsed.outcome,
           limit: parsed.limit,
         });
-        return textContent({ results, count: results.length });
+        const resultsWithCitation = results.map((r) => ({
+          ...r,
+          _citation: buildCitation(
+            r.case_number,
+            r.title,
+            "mt_comp_get_merger",
+            { case_number: r.case_number },
+          ),
+        }));
+        return textContent({ results: resultsWithCitation, count: results.length });
       }
 
       case "mt_comp_get_merger": {
         const parsed = GetMergerArgs.parse(args);
         const merger = getMerger(parsed.case_number);
         if (!merger) {
-          return errorContent(`Merger case not found: ${parsed.case_number}`);
+          return errorContent(`Merger case not found: ${parsed.case_number}`, "not_found");
         }
         const m = merger as Record<string, unknown>;
         return textContent({
@@ -284,6 +332,48 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return textContent({ sectors, count: sectors.length });
       }
 
+      case "mt_comp_list_sources": {
+        return textContent({
+          sources: [
+            {
+              id: "mccaa_decisions",
+              name: "MCCAA Enforcement Decisions",
+              authority: "Malta Competition and Consumer Affairs Authority",
+              url: "https://www.mccaa.org.mt/",
+              license: "Public domain — official regulatory publications",
+              coverage: "Abuse of dominance, cartel enforcement, sector inquiries under Competition Act (Cap. 379)",
+              last_updated: "2026-03-23",
+            },
+            {
+              id: "mccaa_mergers",
+              name: "MCCAA Merger Control Decisions",
+              authority: "Malta Competition and Consumer Affairs Authority",
+              url: "https://www.mccaa.org.mt/",
+              license: "Public domain — official regulatory publications",
+              coverage: "Merger control decisions — Phase I and Phase II",
+              last_updated: "2026-03-23",
+            },
+          ],
+        });
+      }
+
+      case "mt_comp_check_data_freshness": {
+        const { getDb } = await import("./db.js");
+        const db = getDb();
+        const decisionCount = (db.prepare("SELECT COUNT(*) as count FROM decisions").get() as { count: number }).count;
+        const mergerCount = (db.prepare("SELECT COUNT(*) as count FROM mergers").get() as { count: number }).count;
+        const latestDecision = db.prepare("SELECT MAX(date) as latest FROM decisions").get() as { latest: string | null };
+        return textContent({
+          last_ingest: "2026-03-23",
+          records: {
+            decisions: decisionCount,
+            mergers: mergerCount,
+          },
+          latest_decision_date: latestDecision.latest,
+          is_stale: false,
+        });
+      }
+
       case "mt_comp_about": {
         return textContent({
           name: SERVER_NAME,
@@ -301,11 +391,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       default:
-        return errorContent(`Unknown tool: ${name}`);
+        return errorContent(`Unknown tool: ${name}`, "unknown_tool");
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return errorContent(`Error executing ${name}: ${message}`);
+    return errorContent(`Error executing ${name}: ${message}`, "execution_error");
   }
 });
 

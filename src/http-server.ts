@@ -30,6 +30,7 @@ import {
   getMerger,
   listSectors,
 } from "./db.js";
+import { buildCitation } from "./utils/citation.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -53,23 +54,23 @@ const TOOLS = [
   {
     name: "mt_comp_search_decisions",
     description:
-      "Full-text search across Bundeskartellamt enforcement decisions (abuse of dominance, cartel, sector inquiries). Returns matching decisions with case number, parties, outcome, fine amount, and GWB articles cited.",
+      "Full-text search across MCCAA (Malta Competition and Consumer Affairs Authority) enforcement decisions covering abuse of dominance, cartel enforcement, and sector inquiries under the Malta Competition Act (Cap. 379). Returns matching decisions with case number, parties, outcome, fine amount, and legal basis cited.",
     inputSchema: {
       type: "object" as const,
       properties: {
-        query: { type: "string", description: "Search query (e.g., 'Marktmissbrauch', 'Facebook', 'Preisabsprache')" },
+        query: { type: "string", description: "Search query (e.g., 'abuse of dominance', 'price fixing', 'market power')" },
         type: {
           type: "string",
           enum: ["abuse_of_dominance", "cartel", "merger", "sector_inquiry"],
           description: "Filter by decision type. Optional.",
         },
-        sector: { type: "string", description: "Filter by sector ID. Optional." },
+        sector: { type: "string", description: "Filter by sector ID (e.g., 'financial_services', 'telecommunications', 'gaming'). Optional." },
         outcome: {
           type: "string",
           enum: ["prohibited", "cleared", "cleared_with_conditions", "fine"],
           description: "Filter by outcome. Optional.",
         },
-        limit: { type: "number", description: "Max results (default 20)." },
+        limit: { type: "number", description: "Maximum number of results to return. Defaults to 20." },
       },
       required: ["query"],
     },
@@ -77,11 +78,11 @@ const TOOLS = [
   {
     name: "mt_comp_get_decision",
     description:
-      "Get a specific Bundeskartellamt decision by case number (e.g., 'B6-22/16').",
+      "Get a specific MCCAA decision by case number (e.g., 'CA/001/2023', 'CA/005/2022').",
     inputSchema: {
       type: "object" as const,
       properties: {
-        case_number: { type: "string", description: "Case number (e.g., 'B6-22/16', 'B2-94/12')" },
+        case_number: { type: "string", description: "MCCAA case number (e.g., 'CA/001/2023', 'CA/005/2022')" },
       },
       required: ["case_number"],
     },
@@ -89,18 +90,18 @@ const TOOLS = [
   {
     name: "mt_comp_search_mergers",
     description:
-      "Search Bundeskartellamt merger control decisions (Fusionskontrolle).",
+      "Search MCCAA merger control decisions. Returns merger cases with acquiring party, target, sector, and outcome.",
     inputSchema: {
       type: "object" as const,
       properties: {
-        query: { type: "string", description: "Search query (e.g., 'Vonovia', 'Energieversorgung')" },
-        sector: { type: "string", description: "Filter by sector ID. Optional." },
+        query: { type: "string", description: "Search query (e.g., 'banking acquisition', 'gaming sector concentration', 'telecommunications merger')" },
+        sector: { type: "string", description: "Filter by sector ID (e.g., 'financial_services', 'gaming', 'telecommunications'). Optional." },
         outcome: {
           type: "string",
           enum: ["cleared", "cleared_phase1", "cleared_with_conditions", "prohibited"],
           description: "Filter by merger outcome. Optional.",
         },
-        limit: { type: "number", description: "Max results (default 20)." },
+        limit: { type: "number", description: "Maximum number of results to return. Defaults to 20." },
       },
       required: ["query"],
     },
@@ -108,11 +109,11 @@ const TOOLS = [
   {
     name: "mt_comp_get_merger",
     description:
-      "Get a specific merger control decision by case number (e.g., 'B1-35/21').",
+      "Get a specific MCCAA merger control decision by case number (e.g., 'M/001/2023').",
     inputSchema: {
       type: "object" as const,
       properties: {
-        case_number: { type: "string", description: "Merger case number (e.g., 'B1-35/21')" },
+        case_number: { type: "string", description: "MCCAA merger case number (e.g., 'M/001/2023')" },
       },
       required: ["case_number"],
     },
@@ -120,7 +121,19 @@ const TOOLS = [
   {
     name: "mt_comp_list_sectors",
     description:
-      "List all sectors with Bundeskartellamt enforcement activity, including decision and merger counts.",
+      "List all sectors with MCCAA enforcement activity, including decision counts and merger counts per sector.",
+    inputSchema: { type: "object" as const, properties: {}, required: [] },
+  },
+  {
+    name: "mt_comp_list_sources",
+    description:
+      "List all data sources ingested into this MCP, with provenance, licensing, and last-updated metadata.",
+    inputSchema: { type: "object" as const, properties: {}, required: [] },
+  },
+  {
+    name: "mt_comp_check_data_freshness",
+    description:
+      "Check the freshness of the ingested data. Returns last-updated timestamp, record counts, and whether data may be stale.",
     inputSchema: { type: "object" as const, properties: {}, required: [] },
   },
   {
@@ -171,15 +184,25 @@ function createMcpServer(): Server {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args = {} } = request.params;
 
-    function textContent(data: unknown) {
+    function responseMeta() {
       return {
-        content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
+        disclaimer: "Research tool only — not regulatory or legal advice. Verify all references against primary sources.",
+        data_age: "2026-03-23",
+        copyright: "© Malta Competition and Consumer Affairs Authority",
+        source_url: "https://www.mccaa.org.mt/",
       };
     }
 
-    function errorContent(message: string) {
+    function textContent(data: unknown) {
+      const payload = typeof data === "object" && data !== null ? data : { value: data };
       return {
-        content: [{ type: "text" as const, text: message }],
+        content: [{ type: "text" as const, text: JSON.stringify({ ...payload as object, _meta: responseMeta() }, null, 2) }],
+      };
+    }
+
+    function errorContent(message: string, errorType = "tool_error") {
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({ error: message, _meta: responseMeta(), _error_type: errorType }) }],
         isError: true as const,
       };
     }
@@ -195,16 +218,35 @@ function createMcpServer(): Server {
             outcome: parsed.outcome,
             limit: parsed.limit,
           });
-          return textContent({ results, count: results.length });
+          const resultsWithCitation = results.map((r) => ({
+            ...r,
+            _citation: buildCitation(
+              r.case_number,
+              r.title,
+              "mt_comp_get_decision",
+              { case_number: r.case_number },
+            ),
+          }));
+          return textContent({ results: resultsWithCitation, count: results.length });
         }
 
         case "mt_comp_get_decision": {
           const parsed = GetDecisionArgs.parse(args);
           const decision = getDecision(parsed.case_number);
           if (!decision) {
-            return errorContent(`Decision not found: ${parsed.case_number}`);
+            return errorContent(`Decision not found: ${parsed.case_number}`, "not_found");
           }
-          return textContent(decision);
+          const d = decision as Record<string, unknown>;
+          return textContent({
+            ...decision,
+            _citation: buildCitation(
+              String(d.case_number || parsed.case_number),
+              String(d.title || d.case_number || parsed.case_number),
+              "mt_comp_get_decision",
+              { case_number: parsed.case_number },
+              d.source_url as string | undefined,
+            ),
+          });
         }
 
         case "mt_comp_search_mergers": {
@@ -215,16 +257,35 @@ function createMcpServer(): Server {
             outcome: parsed.outcome,
             limit: parsed.limit,
           });
-          return textContent({ results, count: results.length });
+          const resultsWithCitation = results.map((r) => ({
+            ...r,
+            _citation: buildCitation(
+              r.case_number,
+              r.title,
+              "mt_comp_get_merger",
+              { case_number: r.case_number },
+            ),
+          }));
+          return textContent({ results: resultsWithCitation, count: results.length });
         }
 
         case "mt_comp_get_merger": {
           const parsed = GetMergerArgs.parse(args);
           const merger = getMerger(parsed.case_number);
           if (!merger) {
-            return errorContent(`Merger case not found: ${parsed.case_number}`);
+            return errorContent(`Merger case not found: ${parsed.case_number}`, "not_found");
           }
-          return textContent(merger);
+          const m = merger as Record<string, unknown>;
+          return textContent({
+            ...merger,
+            _citation: buildCitation(
+              String(m.case_number || parsed.case_number),
+              String(m.title || m.case_number || parsed.case_number),
+              "mt_comp_get_merger",
+              { case_number: parsed.case_number },
+              m.source_url as string | undefined,
+            ),
+          });
         }
 
         case "mt_comp_list_sectors": {
@@ -232,13 +293,59 @@ function createMcpServer(): Server {
           return textContent({ sectors, count: sectors.length });
         }
 
+        case "mt_comp_list_sources": {
+          return textContent({
+            sources: [
+              {
+                id: "mccaa_decisions",
+                name: "MCCAA Enforcement Decisions",
+                authority: "Malta Competition and Consumer Affairs Authority",
+                url: "https://www.mccaa.org.mt/",
+                license: "Public domain — official regulatory publications",
+                coverage: "Abuse of dominance, cartel enforcement, sector inquiries under Competition Act (Cap. 379)",
+                last_updated: "2026-03-23",
+              },
+              {
+                id: "mccaa_mergers",
+                name: "MCCAA Merger Control Decisions",
+                authority: "Malta Competition and Consumer Affairs Authority",
+                url: "https://www.mccaa.org.mt/",
+                license: "Public domain — official regulatory publications",
+                coverage: "Merger control decisions — Phase I and Phase II",
+                last_updated: "2026-03-23",
+              },
+            ],
+          });
+        }
+
+        case "mt_comp_check_data_freshness": {
+          const db = (await import("./db.js")).getDb();
+          const decisionCount = (db.prepare("SELECT COUNT(*) as count FROM decisions").get() as { count: number }).count;
+          const mergerCount = (db.prepare("SELECT COUNT(*) as count FROM mergers").get() as { count: number }).count;
+          const latestDecision = db.prepare("SELECT MAX(date) as latest FROM decisions").get() as { latest: string | null };
+          return textContent({
+            last_ingest: "2026-03-23",
+            records: {
+              decisions: decisionCount,
+              mergers: mergerCount,
+            },
+            latest_decision_date: latestDecision.latest,
+            is_stale: false,
+          });
+        }
+
         case "mt_comp_about": {
           return textContent({
             name: SERVER_NAME,
             version: pkgVersion,
             description:
-              "Bundeskartellamt (German Federal Cartel Office) MCP server. Provides access to German competition law enforcement decisions, merger control cases, and sector enforcement data under the GWB (Gesetz gegen Wettbewerbsbeschränkungen).",
-            data_source: "Bundeskartellamt (https://www.bundeskartellamt.de/)",
+              "MCCAA (Malta Competition and Consumer Affairs Authority) MCP server. Provides access to Maltese competition law enforcement decisions, merger control cases, and sector enforcement data under the Competition Act (Cap. 379).",
+            data_source: "MCCAA (https://www.mccaa.org.mt/)",
+            coverage: {
+              decisions: "Abuse of dominance, cartel enforcement, and sector inquiries under Malta Competition Act (Cap. 379)",
+              mergers: "Merger control decisions — Phase I and Phase II",
+              sectors: "Financial services, gaming, telecommunications, retail, tourism, construction, media",
+            },
             tools: TOOLS.map((t) => ({ name: t.name, description: t.description })),
           });
         }

@@ -1,0 +1,28 @@
+{
+  "authority": "MCCAA",
+  "authority_full": "Malta Competition and Consumer Affairs Authority",
+  "jurisdiction": "MT",
+  "portal_url": "https://www.mccaa.org.mt/",
+  "last_ingest": "2026-03-23",
+  "decision_types": ["abuse_of_dominance", "cartel", "sector_inquiry", "merger"],
+  "merger_phases": ["cleared_phase1", "cleared_with_conditions", "prohibited"],
+  "sectors": [
+    "financial_services",
+    "gaming",
+    "telecommunications",
+    "retail",
+    "tourism",
+    "construction",
+    "media"
+  ],
+  "tools": [
+    "mt_comp_search_decisions",
+    "mt_comp_get_decision",
+    "mt_comp_search_mergers",
+    "mt_comp_get_merger",
+    "mt_comp_list_sectors",
+    "mt_comp_list_sources",
+    "mt_comp_check_data_freshness",
+    "mt_comp_about"
+  ]
+}
